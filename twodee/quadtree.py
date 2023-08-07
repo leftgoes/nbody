@@ -1,11 +1,12 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
-from typing import Iterable, Self, Generator
+from typing import Iterable, Self, Generator, Literal
 
-from .body import Body2, Vector2, Rect2
+from .body import Body2
+from .geometry import Vector2, Rect2
 
-
-@dataclass(repr=False)
+     
+@dataclass(repr=False, slots=True)
 class Node4:
     boundary: Rect2
 
@@ -13,11 +14,16 @@ class Node4:
     northeast: Self = None
     southwest: Self = None
     southeast: Self = None
-    barycenter: Body2 = None
+
+    _barycenter: Body2 | None = field(default_factory=lambda: Body2.zero())
     _count: int = 0
 
     def __repr__(self) -> str:
         return f'Node4({self.count})' if self.count <= 1 else f'Node4({", ".join(str(child.count) for child in self.children)})'
+
+    @property
+    def barycenter(self) -> Body2:
+        return self._barycenter
 
     @property
     def count(self):
@@ -31,22 +37,26 @@ class Node4:
     def subdivided(self) -> bool:
         return self.northwest is not None
 
-    def traverse(self) -> Generator[Self, None, None]:  # post order traversal
+    def traverse(self, order: Literal['post', 'pre']) -> Generator[Self, None, None]:
         if self.count == 0:
             yield self
             return
         
+        if order == 'pre':
+            yield self
+
         if self.count != 1:
             for child in self.children:
-                for node in child.traverse():
+                for node in child.traverse(order):
                     yield node
         
-        yield self
+        if order == 'post':
+            yield self
 
     def calculate_barycenter(self) -> None:
-        self.barycenter = sum((child.barycenter for child in self.children), start=Body2.zero())
-        self.barycenter.pos /= self.count
-        self.barycenter.vel /= self.count
+        self._barycenter = sum((child.barycenter for child in self.children), start=Body2.zero())
+        self._barycenter.pos /= self.count
+        self._barycenter.vel /= self.count
 
     def subdivide(self) -> None:
         boundary_center = self.boundary.center
@@ -68,14 +78,14 @@ class Node4:
             return
 
         if self.count == 0:
-            self.barycenter = body
+            self._barycenter = body
             self._count += 1
             return
         
         if not self.subdivided:
             self.subdivide()
-            self.insert_children(self.barycenter)
-            self.barycenter = None
+            self.insert_children(self._barycenter)
+            self._barycenter = None
         
         self.insert_children(body)
         self._count += 1
@@ -112,12 +122,6 @@ class Quadtree:
         self.root.insert(body)
 
     def calculate_barycenters(self) -> None:
-        for node in self.root.traverse():
-            if node.count == 0:
-                node.barycenter = Body2(0, Vector2.zero(), Vector2.zero())
-                
+        for node in self.root.traverse(order='post'):
             if node.subdivided:
                 node.calculate_barycenter()
-            
-            
-            
